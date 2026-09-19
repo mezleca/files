@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+
+import argparse
+import platform
+import shutil
+import subprocess
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+BUILD_DIR = ROOT / "build"
+SYSTEM = platform.system()
+
+def run(
+    command: str | list[str], check: bool = True, env: Mapping[str, str] | None = None, capture: bool = False
+) -> tuple[int, str]:
+    display = command if isinstance(command, str) else subprocess.list2cmdline(list(command))
+    print(f"exec: {display}")
+    result = subprocess.run(
+        command,
+        shell=isinstance(command, str),
+        env=env,
+        capture_output=capture,
+        text=capture,
+        encoding="utf-8",
+        cwd=ROOT,
+        check=SYSTEM != "Linux",
+    )
+
+    if check and result.returncode != 0:
+        print(f"[ez] command failed with exit code {result.returncode}")
+        sys.exit(result.returncode)
+
+    return result.returncode, result.stdout or ""
+
+def require_tool(name: str) -> None:
+    if shutil.which(name) is not None:
+        return
+
+    print(f"[ez] required tool not found: {name}")
+    sys.exit(1)
+
+def init() -> None:
+    for tool in ("git", "cmake", "ninja", "clang-format"):
+        require_tool(tool)
+
+    if not (ROOT / ".gitmodules").exists():
+        return
+
+    print("[ez] initializing submodules...")
+    run(["git", "submodule", "update", "--init", "--recursive"])
+
+def configure(build_type: str) -> Path:
+    build_dir = ROOT / "build"
+    command = [
+        "cmake", "-S", str(ROOT), "-B", str(build_dir), "-G", "Ninja",
+        f"-DCMAKE_BUILD_TYPE={build_type}",
+        "-DCMAKE_CXX_COMPILER=clang",
+        "-DCMAKE_C_COMPILER=clang"
+    ]
+    run(command)
+    return build_dir
+
+def build(build_type: str) -> Path:
+    build_dir = configure(build_type)
+    run(["cmake", "--build", str(build_dir), "--parallel"])
+    return build_dir
+
+def format_code() -> None:
+    run("clang-format -i $(rg --files -g '*.{h,hpp,cpp,cc,cxx}' src)")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="ez")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    build_parser = subparsers.add_parser("build")
+    build_parser.add_argument("--type", choices=("debug", "release"), default="debug")
+
+    subparsers.add_parser("init")
+    subparsers.add_parser("format")
+
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("--type", choices=("debug", "release"), default="debug")
+
+    args = parser.parse_args()
+
+    if args.command == "init":
+        init()
+        return
+
+    if args.command == "format":
+        format_code()
+        return
+
+    build_type = args.type.capitalize()
+
+    if args.command == "build":
+        build(build_type)
+    else:
+        build_dir = build(build_type)
+        run([str(build_dir / "file-manager")])
+
+if __name__ == "__main__":
+    main()

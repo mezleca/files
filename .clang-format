@@ -1,0 +1,19 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 130
+AccessModifierOffset: -4
+IndentAccessModifiers: false
+AllowShortEnumsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+DerivePointerAlignment: false
+IndentCaseLabels: true
+PointerAlignment: Left
+AlignAfterOpenBracket: BlockIndent
+SortIncludes: false
+NamespaceIndentation: All
+FixNamespaceComments: true
+AlwaysBreakTemplateDeclarations: Yes
+AlignTrailingComments:
+    Kind: Leave
