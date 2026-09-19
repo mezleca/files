@@ -2,24 +2,49 @@
 #include "key-value.hpp"
 
 #include <SDL3/SDL.h>
+#include <array>
+#include <cctype>
+#include <functional>
 #include <iostream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+#include <vector>
 #include <ui/backends/opengl/texture-loader.hpp>
 #include <ui/backends/sdl/backend.hpp>
 #include <ui/layout/resizable-container.hpp>
+#include <ui/layout/virtual-layout.hpp>
 #include <ui/tree/node.hpp>
 #include <ui/runtime.hpp>
 #include <ui/ui.hpp>
 #include <ui/widgets/image.hpp>
 #include <ui/widgets/text.hpp>
 #include <ui/widgets/button.hpp>
-#include <ui/widgets/image.hpp>
+#include <ui/widgets/text-input.hpp>
 
 using namespace ui;
 
 constexpr std::array icons{
     std::string_view{"folder"},
     std::string_view{"application-x-addon"},
-    std::string_view{"application-x-executable"}
+    std::string_view{"application-x-executable"},
+    std::string_view{"application-x-sharedlib"},
+    std::string_view{"audio-x-generic"},
+    std::string_view{"font-x-generic"},
+    std::string_view{"image-x-generic"},
+    std::string_view{"package-x-generic"},
+    std::string_view{"system-search"},
+    std::string_view{"text-html"},
+    std::string_view{"text-x-generic"},
+    std::string_view{"text-x-script"},
+    std::string_view{"video-x-generic"},
+    std::string_view{"x-office-address-book"},
+    std::string_view{"x-office-calendar"},
+    std::string_view{"x-office-document"},
+    std::string_view{"x-office-presentation"},
+    std::string_view{"x-office-spreadsheet"}
 };
 
 class Content : public Container {
@@ -42,39 +67,108 @@ public:
             style.border(BORDER_NONE);
         });
 
-        configure_style(StyleType::HOVER, [](Style& style){
-            style.background_color({ 120, 120, 120, 255 });
-        });
+        configure_style(StyleType::HOVER, [](Style& style) { style.background_color({120, 120, 120, 255}); });
     }
 };
 
-enum class EntryType : uint8_t {
-    FILE = 0,
-    EXECUTABLE,
-    FOLDER
-};
-
-static EntryType get_entry_type(const fs::path& entry) {
+static std::string_view get_icon_name(const fs::path& entry) {
     if (fs::is_directory(entry)) {
-        return EntryType::FOLDER;
+        return "folder";
     }
 
     auto status = fs::status(entry);
     auto perms = fs::perms(status.permissions());
 
     if ((perms & fs::perms::owner_exec) != fs::perms::none) {
-        return EntryType::EXECUTABLE;
+        return "application-x-executable";
     }
 
-    return EntryType::FILE;
+    std::string extension = entry.extension().string();
+    for (char& character : extension) {
+        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    }
+
+    if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".gif" || extension == ".bmp" ||
+        extension == ".webp" || extension == ".svg" || extension == ".avif" || extension == ".tif" || extension == ".tiff" ||
+        extension == ".ico") {
+        return "image-x-generic";
+    }
+
+    if (extension == ".mp3" || extension == ".flac" || extension == ".wav" || extension == ".ogg" || extension == ".oga" ||
+        extension == ".opus" || extension == ".m4a" || extension == ".aac") {
+        return "audio-x-generic";
+    }
+
+    if (extension == ".mp4" || extension == ".mkv" || extension == ".avi" || extension == ".mov" || extension == ".webm" ||
+        extension == ".mpeg" || extension == ".mpg" || extension == ".ogv") {
+        return "video-x-generic";
+    }
+
+    if (extension == ".zip" || extension == ".tar" || extension == ".gz" || extension == ".bz2" || extension == ".xz" ||
+        extension == ".7z" || extension == ".rar" || extension == ".zst" || extension == ".deb" || extension == ".rpm" ||
+        extension == ".iso") {
+        return "package-x-generic";
+    }
+
+    if (extension == ".ttf" || extension == ".otf" || extension == ".woff" || extension == ".woff2") {
+        return "font-x-generic";
+    }
+
+    if (extension == ".html" || extension == ".htm") {
+        return "text-html";
+    }
+
+    if (extension == ".sh" || extension == ".bash" || extension == ".zsh" || extension == ".fish" || extension == ".py" ||
+        extension == ".rb" || extension == ".pl" || extension == ".lua" || extension == ".js" || extension == ".ts") {
+        return "text-x-script";
+    }
+
+    if (extension == ".pdf" || extension == ".doc" || extension == ".docx" || extension == ".odt" || extension == ".rtf" ||
+        extension == ".tex" || extension == ".epub") {
+        return "x-office-document";
+    }
+
+    if (extension == ".xls" || extension == ".xlsx" || extension == ".ods" || extension == ".csv") {
+        return "x-office-spreadsheet";
+    }
+
+    if (extension == ".ppt" || extension == ".pptx" || extension == ".odp") {
+        return "x-office-presentation";
+    }
+
+    if (extension == ".ics") {
+        return "x-office-calendar";
+    }
+
+    if (extension == ".vcf") {
+        return "x-office-address-book";
+    }
+
+    if (extension == ".so" || extension == ".dll" || extension == ".dylib") {
+        return "application-x-sharedlib";
+    }
+
+    if (extension == ".txt" || extension == ".md" || extension == ".rst" || extension == ".log" || extension == ".json" ||
+        extension == ".xml" || extension == ".yaml" || extension == ".yml" || extension == ".toml" || extension == ".ini" ||
+        extension == ".conf" || extension == ".cfg" || extension == ".c" || extension == ".h" || extension == ".cc" ||
+        extension == ".cpp" || extension == ".hpp" || extension == ".java") {
+        return "text-x-generic";
+    }
+
+    return "application-x-addon";
 }
 
 class DirectoryEntry : public Container {
 public:
-    // NOTE: use empty id (auto) so these fuckers dont render on top of each other
     DirectoryEntry(fs::path path) : Container({}, StackDirection::Horizontal, "DirectoryEntry"), m_path(path) {
         set_spacing(10.0F);
         set_size({grow(), px(32)});
+        set_input_mode(InputMode::Target);
+    }
+
+    DirectoryEntry& set_on_click(std::function<void(const fs::path&)> callback) {
+        m_on_click = std::move(callback);
+        return *this;
     }
 
     void build() {
@@ -84,21 +178,10 @@ public:
         }
 
         auto& textures = surface().runtime().textures();
-        auto entry_type = get_entry_type(m_path);
+        add<ImageWidget>(textures.find(get_icon_name(m_path))).set_size({px(16), px(16)});
 
-        switch (entry_type) {
-            case EntryType::FILE:
-                add<ImageWidget>(textures.find("application-x-addon")).set_size({px(16), px(16)});
-                break;
-            case EntryType::EXECUTABLE:
-                add<ImageWidget>(textures.find("application-x-executable")).set_size({px(16), px(16)});
-                break;
-            case EntryType::FOLDER:
-                add<ImageWidget>(textures.find("folder")).set_size({px(16), px(16)});
-                break;
-        }
-
-        add<TextWidget>(m_path.string());
+        const std::string name = m_path.filename().string();
+        add<TextWidget>(name.empty() ? m_path.string() : name);
     }
 
     void apply_theme_defaults(const Theme& theme) override {
@@ -109,13 +192,18 @@ public:
             style.border(BORDER_NONE);
         });
 
-        configure_style(StyleType::HOVER, [](Style& style){
-            style.background_color({ 120, 120, 120, 200 });
-        });
+        configure_style(StyleType::HOVER, [](Style& style) { style.background_color({120, 120, 120, 200}); });
     }
 
 private:
+    void on_click(UiEvent&) override {
+        if (m_on_click) {
+            m_on_click(m_path);
+        }
+    }
+
     fs::path m_path;
+    std::function<void(const fs::path&)> m_on_click;
 };
 
 class UserDirectories : public ResizableContainer {
@@ -150,7 +238,7 @@ public:
             fs::path full_path(kv_parser::resolve_path(entry.second));
 
             auto& dir = add<DirectoryButton>(full_path.filename());
-            dir.set_on_click([this, full_path]{
+            dir.set_on_click([this, full_path] {
                 if (m_on_click) {
                     std::cout << "[+] clicked on " << full_path.string() << "\n";
                     m_on_click(full_path);
@@ -167,31 +255,50 @@ private:
     std::function<void(const fs::path&)> m_on_click;
 };
 
-class DirectoryList : public Container {
+class DirectoryList : public VirtualLayout {
 public:
-    DirectoryList() : Container("Directory List", StackDirection::Vertical) {
+    DirectoryList() : VirtualLayout("Directory List", 32.0F) {
         set_spacing(10.0F);
         set_size({grow(), grow()});
-        set_scrollable(true);
     }
 
     void apply_theme_defaults(const Theme& theme) override {
         Container::apply_theme_defaults(theme);
     }
 
-    void build() {
-        if (m_entries.size() == 0) {
-            std::cout << "[+] bulding default content" << "\n";
-            build_default();
+    void build(bool has_directory = false) {
+        clear_built_entries();
+        m_entry_widgets.clear();
+        m_default_entry = nullptr;
+
+        if (m_entries.empty()) {
+            const char* message = has_directory ? "folder has no content" : "Hello :D";
+            set_items(1, [this, message](std::size_t) -> Node& {
+                if (m_default_entry == nullptr) {
+                    m_default_entry = &add<TextWidget>(message);
+                }
+
+                return *m_default_entry;
+            });
             return;
         }
 
-        clear();
-        for (const auto& entry : m_entries) {
-            add<DirectoryEntry>(entry).build();
-        }
+        set_items(m_entries.size(), [this](std::size_t index) -> Node& {
+            const auto found = m_entry_widgets.find(index);
+            if (found != m_entry_widgets.end()) {
+                return *found->second;
+            }
 
-        m_using_default = false;
+            auto& entry = add<DirectoryEntry>(m_entries[index]);
+            entry.build();
+            entry.set_on_click([this](const fs::path& path) {
+                if (m_on_click) {
+                    m_pending_entry = path;
+                }
+            });
+            m_entry_widgets.emplace(index, &entry);
+            return entry;
+        });
     }
 
     void add_entry(fs::path path) {
@@ -200,24 +307,42 @@ public:
 
     void clear_entries() {
         m_entries.clear();
-        clear();
-        m_using_default = false;
+        clear_built_entries();
+        m_entry_widgets.clear();
+        m_default_entry = nullptr;
+        m_pending_entry.reset();
+        set_items(0);
+    }
+
+    void set_on_click(std::function<void(const fs::path&)> callback) {
+        m_on_click = std::move(callback);
     }
 
 protected:
-    void build_default() {
-        if (m_using_default) {
+    void on_update(float) override {
+        if (!m_pending_entry.has_value()) {
             return;
         }
 
-        clear();
-        add<TextWidget>("uhh, no folda");
-        m_using_default = true;
+        fs::path path = std::move(*m_pending_entry);
+        m_pending_entry.reset();
+        if (m_on_click) {
+            m_on_click(path);
+        }
     }
 
 private:
+    void clear_built_entries() {
+        while (!children().empty()) {
+            remove(*children().back());
+        }
+    }
+
     std::vector<fs::path> m_entries;
-    bool m_using_default = false;
+    std::unordered_map<std::size_t, DirectoryEntry*> m_entry_widgets;
+    TextWidget* m_default_entry = nullptr;
+    std::function<void(const fs::path&)> m_on_click;
+    std::optional<fs::path> m_pending_entry;
 };
 
 static bool is_same_entry(const fs::path& a, const fs::path& b) {
@@ -225,7 +350,8 @@ static bool is_same_entry(const fs::path& a, const fs::path& b) {
         return false;
     }
 
-    return fs::equivalent(a, b);
+    std::error_code error;
+    return fs::equivalent(a, b, error);
 }
 
 class App {
@@ -250,43 +376,87 @@ public:
         auto& content = m_ui.root().add<Content>();
         auto& container = content.add<Container>("container", StackDirection::Horizontal);
 
-        m_dirs = &container.add<UserDirectories>();
-        m_dir_list = &container.add<DirectoryList>();
+        auto& dirs_column = container.add<Container>("user-directories-column", StackDirection::Vertical);
+        dirs_column.set_size({fit(), grow()});
+        m_dirs = &dirs_column.add<UserDirectories>();
+
+        auto& directory_column = container.add<Container>("directory-column", StackDirection::Vertical);
+        directory_column.set_size({grow(), grow()});
+        directory_column.set_spacing(8.0F);
+
+        auto& search_bar = directory_column.add<Container>("search-bar");
+        search_bar.set_size({grow(), fit()});
+        const auto& theme = m_ui.theme();
+        search_bar.configure_all_styles([&theme](Style& style) {
+            style.background_color(theme.background_secondary_color)
+                .border(BORDER_BOTTOM)
+                .border_color(theme.header_border_color)
+                .border_thickness(1.0F)
+                .padding({12.0F, 10.0F});
+        });
+
+        auto& search_input = search_bar.add<TextInputWidget>(m_search_value, "search");
+        search_input.set_size({grow(), px(42.0F)});
+        search_input.set_icon(texture_register.find("system-search"));
+
+        m_dir_list = &directory_column.add<DirectoryList>();
 
         fs::path dirs_path(kv_parser::resolve_path("$HOME/.config/user-dirs.dirs"));
         m_dirs->build(kv_parser::parse_file(dirs_path));
 
-        m_dirs->set_on_click([&](const fs::path& dir){
-            if (is_same_entry(dir, m_current_dir)) {
-                return;
-            }
+        m_dirs->set_on_click([this](const fs::path& dir) { open_directory(dir, true); });
 
-            if (!fs::is_directory(dir)) {
-                m_dir_list->clear_entries();
-                m_dir_list->build();
-                return;
-            }
-
-            m_current_dir = dir;
-            m_dir_list->clear_entries();
-
-            for (const auto& entry : fs::directory_iterator(m_current_dir)) {
-                m_dir_list->add_entry(entry);
-            }
-
-            m_dir_list->build();
-        });
+        m_dir_list->set_on_click([this](const fs::path& dir) { open_directory(dir, false); });
 
         m_dir_list->build();
     }
 
 private:
+    void open_directory(const fs::path& directory, bool reset_buffer) {
+        if (is_same_entry(directory, m_current_dir)) {
+            return;
+        }
+
+        if (!fs::is_directory(directory)) {
+            if (reset_buffer) {
+                m_dir_list->clear_entries();
+                m_dir_list->build();
+            }
+            return;
+        }
+
+        if (reset_buffer || m_directory_buffer.empty()) {
+            m_directory_buffer.clear();
+            m_directory_buffer.push_back(directory);
+            m_current_buffer_index = 0;
+        } else {
+            if (m_current_buffer_index + 1 < m_directory_buffer.size()) {
+                m_directory_buffer.erase(m_directory_buffer.begin() + m_current_buffer_index + 1, m_directory_buffer.end());
+            }
+
+            m_directory_buffer.push_back(directory);
+            m_current_buffer_index = m_directory_buffer.size() - 1;
+        }
+
+        m_current_dir = directory;
+        m_dir_list->clear_entries();
+
+        for (const auto& entry : fs::directory_iterator(m_current_dir)) {
+            m_dir_list->add_entry(entry.path());
+        }
+
+        m_dir_list->build(true);
+    }
+
     UI& m_ui;
 
     UserDirectories* m_dirs;
     DirectoryList* m_dir_list;
 
+    std::string m_search_value;
     fs::path m_current_dir;
+    std::vector<fs::path> m_directory_buffer;
+    std::size_t m_current_buffer_index = 0;
 };
 
 int main() {
