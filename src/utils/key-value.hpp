@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -7,7 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "./utils.hpp"
+#include "./common.hpp"
 
 using KeyValueMap = std::unordered_map<std::string, std::string>;
 
